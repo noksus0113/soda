@@ -58,7 +58,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .talk button{flex:1 1 150px;font-size:17px}
 .talk button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .hint{margin:0;color:var(--muted);font-size:13px}
-.cam{position:absolute;left:12px;bottom:12px;z-index:2;width:88px;height:66px;object-fit:cover;border-radius:12px;border:2px solid var(--surface);transform:scaleX(-1);background:#000}
+.cam{cursor:pointer;position:absolute;left:12px;bottom:12px;z-index:2;width:88px;height:66px;object-fit:cover;border-radius:12px;border:2px solid var(--surface);transform:scaleX(-1);background:#000}
 [hidden]{display:none!important}
 @media (prefers-reduced-motion: reduce){.jump{animation:none}}
 </style>
@@ -67,7 +67,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="app">
   <header>
     <h1>소다</h1>
-    <p>민트 소다를 좋아하는 버츄얼 캐릭터 · v5</p>
+    <p>민트 소다를 좋아하는 버츄얼 캐릭터 · v7</p>
   </header>
 
   <div class="stage">
@@ -339,6 +339,12 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       .then(function(){ camBusy = false; });
   }
   camBtn.addEventListener("click", function(){ if (camBusy) return; if (camOn) stopCam(); else startCam(); });
+  // Tap the small camera view to set the resting face again.
+  video.addEventListener("click", function(){
+    if (!camOn) return;
+    neutral = null; neutralN = 0;
+    hint.textContent = "기준 표정을 다시 잡는 중이에요. 정면을 보고 눈은 뜨고 입은 다물어 주세요.";
+  });
 
   function track(now){
     if (!camOn || !landmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return;
@@ -369,8 +375,16 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
     var mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2;
     var yawRaw = ((n.x - mx) * ar) / d, pitchRaw = (n.y - my) / d;
     var rollRaw = Math.atan2(dy, dx) * 180 / Math.PI;
+    // Eye and mouth openness measured straight from the landmarks (steadier than the scores alone).
+    function dist(i, j){ return Math.hypot((lm[i].x - lm[j].x) * ar, lm[i].y - lm[j].y); }
+    var earL = dist(386, 374) / (dist(263, 362) || 1e-6);   // viewer's left eye
+    var earR = dist(159, 145) / (dist(33, 133) || 1e-6);    // viewer's right eye
+    var gap = dist(13, 14) / d;                              // inner lips, relative to eye distance
     if (neutralN < 15){
-      neutral = neutral || {yaw: 0, pitch: 0, blink: 0};
+      neutral = neutral || {yaw: 0, pitch: 0, blink: 0, earL: 0, earR: 0, gap: 0};
+      neutral.earL += (earL - neutral.earL) / (neutralN + 1);
+      neutral.earR += (earR - neutral.earR) / (neutralN + 1);
+      neutral.gap += (gap - neutral.gap) / (neutralN + 1);
       neutral.blink += ((g("eyeBlinkLeft") + g("eyeBlinkRight")) / 2 - neutral.blink) / (neutralN + 1);
       neutral.yaw += (yawRaw - neutral.yaw) / (neutralN + 1);
       neutral.pitch += (pitchRaw - neutral.pitch) / (neutralN + 1);
@@ -383,9 +397,23 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
     mix("roll", clamp(-rollRaw * 1.2, -30, 30), 0.6);
 
     var nb = neutral.blink + 0.08, span = Math.max(0.2, 0.7 - nb);
-    mix("lidL", 1 - clamp((g("eyeBlinkLeft") - nb) / span, 0, 0.92), 0.7);
-    mix("lidR", 1 - clamp((g("eyeBlinkRight") - nb) / span, 0, 0.92), 0.7);
-    mix("jaw", clamp((g("jawOpen") - 0.02) * 2.6, 0, 1), 0.6);
+    function openness(ear, base, score){
+      var geo = clamp((ear / (base || 1e-6) - 0.45) / 0.4, 0, 1);
+      var bs = 1 - clamp((score - nb) / span, 0, 1);
+      return geo * 0.65 + bs * 0.35;
+    }
+    var oL = openness(earL, neutral.earL, g("eyeBlinkLeft"));
+    var oR = openness(earR, neutral.earR, g("eyeBlinkRight"));
+    // Wink assist: when one eye is clearly more closed than the other, commit to a wink.
+    if (Math.abs(rig.yaw) < 0.6){
+      if (oR - oL > 0.3 && oL < 0.6){ oL = 0; oR = 1; }
+      else if (oL - oR > 0.3 && oR < 0.6){ oR = 0; oL = 1; }
+    }
+    mix("lidL", Math.max(0.08, oL), 0.7);
+    mix("lidR", Math.max(0.08, oR), 0.7);
+    var jaw = clamp((gap - neutral.gap - 0.035) / 0.28, 0, 1);
+    mix("jaw", jaw, 0.6);
+    if (jaw === 0 && rig.jaw < 0.04) rig.jaw = 0;
     mix("smile", clamp((g("mouthSmileLeft") + g("mouthSmileRight")) / 2 * 2, 0, 1), 0.5);
     mix("pucker", clamp(g("mouthPucker") * 1.2, 0, 1), 0.4);
     var up = (g("browInnerUp") + g("browOuterUpLeft") + g("browOuterUpRight")) / 3;
@@ -428,9 +456,12 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
     head.setAttribute("transform", "translate(" + (look.x * 6 * amp) + " " + (bob + look.y * 4 * amp) + ") rotate(" + (look.x * 3 + roll) + " 200 290)");
     var squash = 1 - Math.abs(look.x) * 0.045 * (amp - 1);
     face.setAttribute("transform", "translate(" + (look.x * 7 * amp) + " " + (look.y * 5 * amp) + ") translate(200 215) scale(" + squash + " 1) translate(-200 -215)");
-    backHair.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ")");
-    tailL.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (sway - look.x * 3) + " 112 166)");
-    tailR.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (-sway - look.x * 3) + " 288 166)");
+    // Back hair and twin tails ride with the head; the tails hang back toward gravity a little.
+    var tilt = look.x * 3 + roll;
+    var rear = "translate(" + (look.x * 6 * amp * 0.55 - look.x * 3) + " " + (bob + look.y * 4 * amp * 0.7) + ") rotate(" + tilt + " 200 290)";
+    backHair.setAttribute("transform", rear);
+    tailL.setAttribute("transform", rear + " rotate(" + (sway - look.x * 3 - roll * 0.45) + " 112 166)");
+    tailR.setAttribute("transform", rear + " rotate(" + (-sway - look.x * 3 - roll * 0.45) + " 288 166)");
     body.setAttribute("transform", "translate(" + (look.x * 1.5 * (amp - 1)) + " " + (bob * 0.3) + ") rotate(" + (roll * 0.15) + " 200 470)");
 
     // blink
@@ -448,7 +479,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       if (live){
         lidNow = i === 0 ? rig.lidL : rig.lidR;
         ix = rig.irisX * 6; iy = rig.irisY * 4;
-        happy = happy || (rig.smile > 0.75 && lidNow < 0.75);
+        happy = happy || (rig.smile > 0.8 && rig.lidL < 0.7 && rig.lidR < 0.7);
       }
       eye.open.setAttribute("visibility", happy ? "hidden" : "visible");
       eye.happy.setAttribute("visibility", happy ? "visible" : "hidden");
