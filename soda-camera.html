@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>소다 얼굴 트래킹</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one-screen stage. Name plate top-left, character fills the middle, controls docked at the bottom. */
+:root{
+  --bg:#e6f6f4;
+  --stage-top:#d3f1ee;
+  --stage-bottom:#c5e3fb;
+  --surface:#ffffff;
+  --ink:#16343c;
+  --muted:#4d6f77;
+  --line:#b9dcd9;
+  --accent:#12a595;
+  --accent-ink:#ffffff;
+  --font-display:"Jua","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-body:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1f25; --stage-top:#123039; --stage-bottom:#152a45; --surface:#17313a;
+    --ink:#e4f6f4; --muted:#9dc0c2; --line:#2a4c56; --accent:#35cdbb; --accent-ink:#06211f;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1f25; --stage-top:#123039; --stage-bottom:#152a45; --surface:#17313a;
+  --ink:#e4f6f4; --muted:#9dc0c2; --line:#2a4c56; --accent:#35cdbb; --accent-ink:#06211f;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.5}
+.app{height:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:12px;padding:16px}
+header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+h1{font-family:var(--font-display);font-weight:400;font-size:28px;margin:0;line-height:1.1}
+header p{margin:0;color:var(--muted);font-size:14px}
+.stage{position:relative;flex:1;min-height:240px;border-radius:24px;overflow:hidden;
+  background:linear-gradient(180deg,var(--stage-top),var(--stage-bottom));border:1px solid var(--line)}
+.stage svg{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:pointer}
+.bubble{position:absolute;left:16px;right:16px;top:14px;z-index:2;margin:0 auto;width:fit-content;max-width:calc(100% - 32px);
+  background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:8px 14px;
+  font-size:15px;text-align:center;overflow-wrap:anywhere;pointer-events:none}
+.jump{animation:jump .45s ease-out}
+@keyframes jump{0%{transform:translateY(0)}35%{transform:translateY(-14px)}100%{transform:translateY(0)}}
+.controls{display:flex;flex-direction:column;gap:10px}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+button{font:inherit;font-family:var(--font-display);color:var(--ink);background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:10px 6px;min-height:46px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.talk{display:flex;gap:8px;flex-wrap:wrap}
+.talk button{flex:1 1 150px;font-size:17px}
+.talk button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.hint{margin:0;color:var(--muted);font-size:13px}
+.cam{position:absolute;left:12px;bottom:12px;z-index:2;width:88px;height:66px;object-fit:cover;border-radius:12px;border:2px solid var(--surface);transform:scaleX(-1);background:#000}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion: reduce){.jump{animation:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>소다</h1>
+    <p>민트 소다를 좋아하는 버츄얼 캐릭터</p>
+  </header>
+
+  <div class="stage">
+    <p class="bubble" id="bubble" aria-live="polite">안녕! 나는 소다야. 나를 톡 눌러 봐!</p>
+    <video class="cam" id="cam" playsinline muted hidden></video>
+    <svg id="char" viewBox="0 0 400 470" preserveAspectRatio="xMidYMax meet" role="img" aria-label="민트색 양갈래 머리를 한 캐릭터 소다">
+      <defs>
+        <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#8fe8d9"/><stop offset=".65" stop-color="#6fd6cf"/><stop offset="1" stop-color="#6aaef7"/>
+        </linearGradient>
+        <linearGradient id="hairBack" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#5fc9bf"/><stop offset="1" stop-color="#4f93e0"/>
+        </linearGradient>
+        <linearGradient id="iris" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#2f6fd6"/><stop offset="1" stop-color="#5fe3cf"/>
+        </linearGradient>
+        <clipPath id="eyeClip"><ellipse rx="17" ry="20"/></clipPath>
+      </defs>
+
+      <g id="jumper">
+        <!-- twin tails -->
+        <g id="tailL"><path d="M108 160 C48 165 26 250 52 332 C60 354 82 348 84 326 C76 270 96 222 124 200Z" fill="url(#hairBack)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/></g>
+        <g id="tailR"><path d="M292 160 C352 165 374 250 348 332 C340 354 318 348 316 326 C324 270 304 222 276 200Z" fill="url(#hairBack)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/></g>
+
+        <!-- back hair -->
+        <g id="backHair"><path d="M98 205 C88 60 312 60 302 205 C308 262 300 300 286 322 L114 322 C100 300 92 262 98 205Z" fill="url(#hairBack)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/></g>
+
+        <!-- body -->
+        <g id="body">
+          <path d="M122 470 C118 360 150 300 200 300 C250 300 282 360 278 470Z" fill="#fdfefe" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M150 322 Q200 372 250 322 Q232 300 200 300 Q168 300 150 322Z" fill="#59d3c4" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M184 352 v40 M216 352 v40" stroke="#2b5568" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="184" cy="396" r="5" fill="#6aaef7" stroke="#2b5568" stroke-width="2"/>
+          <circle cx="216" cy="396" r="5" fill="#6aaef7" stroke="#2b5568" stroke-width="2"/>
+          <path d="M200 418 C190 432 192 446 200 446 C208 446 210 432 200 418Z" fill="#6aaef7"/>
+        </g>
+        <rect x="186" y="270" width="28" height="40" rx="10" fill="#ffe3d3" stroke="#2b5568" stroke-width="3"/>
+
+        <!-- head -->
+        <g id="head">
+          <ellipse cx="200" cy="205" rx="88" ry="82" fill="#ffecdf" stroke="#2b5568" stroke-width="3"/>
+          <g id="face">
+            <ellipse cx="141" cy="246" rx="15" ry="9" fill="#ff9fb0" opacity=".5"/>
+            <ellipse cx="259" cy="246" rx="15" ry="9" fill="#ff9fb0" opacity=".5"/>
+
+            <g id="eyeL">
+              <g class="open">
+                <ellipse rx="17" ry="20" fill="#fff"/>
+                <g clip-path="url(#eyeClip)"><g class="iris">
+                  <ellipse rx="13" ry="16" fill="url(#iris)"/><ellipse cy="1" rx="6" ry="8" fill="#12305a"/>
+                  <circle cx="-5" cy="-7" r="4.5" fill="#fff"/><circle cx="5" cy="7" r="2" fill="#fff" opacity=".85"/>
+                </g></g>
+                <path d="M-20 -9 Q0 -27 20 -9" fill="none" stroke="#2b5568" stroke-width="4.5" stroke-linecap="round"/>
+              </g>
+              <path class="happy" d="M-16 5 Q0 -14 16 5" fill="none" stroke="#2b5568" stroke-width="5" stroke-linecap="round" visibility="hidden"/>
+            </g>
+            <g id="eyeR">
+              <g class="open">
+                <ellipse rx="17" ry="20" fill="#fff"/>
+                <g clip-path="url(#eyeClip)"><g class="iris">
+                  <ellipse rx="13" ry="16" fill="url(#iris)"/><ellipse cy="1" rx="6" ry="8" fill="#12305a"/>
+                  <circle cx="-5" cy="-7" r="4.5" fill="#fff"/><circle cx="5" cy="7" r="2" fill="#fff" opacity=".85"/>
+                </g></g>
+                <path d="M-20 -9 Q0 -27 20 -9" fill="none" stroke="#2b5568" stroke-width="4.5" stroke-linecap="round"/>
+              </g>
+              <path class="happy" d="M-16 5 Q0 -14 16 5" fill="none" stroke="#2b5568" stroke-width="5" stroke-linecap="round" visibility="hidden"/>
+            </g>
+
+            <g id="brows">
+              <path d="M148 184 Q163 177 178 183" fill="none" stroke="#3f9c98" stroke-width="3.5" stroke-linecap="round"/>
+              <path d="M222 183 Q237 177 252 184" fill="none" stroke="#3f9c98" stroke-width="3.5" stroke-linecap="round"/>
+            </g>
+            <path id="mouth" d="" fill="#b8425a" stroke="#2b5568" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+          </g>
+
+          <!-- front hair -->
+          <path d="M108 212 C98 250 106 282 122 298 C126 262 122 232 128 204Z" fill="url(#hair)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M292 212 C302 250 294 282 278 298 C274 262 278 232 272 204Z" fill="url(#hair)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M106 214 C92 66 308 66 294 214 C288 180 274 156 258 144 C260 164 252 180 240 190 C240 166 226 148 206 140 C210 164 194 182 172 192 C176 170 170 154 160 146 C150 168 130 184 106 214Z" fill="url(#hair)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M198 108 C184 82 200 62 226 68 C212 76 208 92 212 108Z" fill="url(#hair)" stroke="#2b5568" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M150 128 Q170 112 196 112" fill="none" stroke="#d8fbf5" stroke-width="5" stroke-linecap="round" opacity=".8"/>
+          <!-- hair ties and clip -->
+          <circle cx="112" cy="166" r="10" fill="#6aaef7" stroke="#2b5568" stroke-width="3"/>
+          <circle cx="288" cy="166" r="10" fill="#6aaef7" stroke="#2b5568" stroke-width="3"/>
+          <path d="M262 142 C252 156 254 170 262 170 C270 170 272 156 262 142Z" fill="#fff" stroke="#2b5568" stroke-width="2.5" stroke-linejoin="round"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="표정">
+      <button type="button" id="ex-normal" data-ex="normal" aria-pressed="true">기본</button>
+      <button type="button" id="ex-smile" data-ex="smile" aria-pressed="false">웃음</button>
+      <button type="button" id="ex-surprise" data-ex="surprise" aria-pressed="false">놀람</button>
+      <button type="button" id="ex-wink" data-ex="wink" aria-pressed="false">윙크</button>
+    </div>
+    <div class="talk">
+      <button type="button" id="camBtn">카메라 켜기</button>
+      <button type="button" id="hold">누르고 있으면 말해요</button>
+      <button type="button" id="mic" hidden>마이크 켜기</button>
+    </div>
+    <p class="hint" id="hint">카메라를 켜면 소다가 내 표정과 고개 움직임을 따라 해요. 영상은 기기 밖으로 나가지 않아요.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var svg = $("char"), jumper = $("jumper"), head = $("head"), face = $("face"), backHair = $("backHair"),
+      tailL = $("tailL"), tailR = $("tailR"), body = $("body"), brows = $("brows"), mouth = $("mouth"),
+      bubble = $("bubble"), hint = $("hint"), holdBtn = $("hold"), micBtn = $("mic");
+  var eyes = [{el:$("eyeL"), x:163, y:215}, {el:$("eyeR"), x:237, y:215}];
+  eyes.forEach(function(e){
+    e.open = e.el.querySelector(".open"); e.happy = e.el.querySelector(".happy"); e.iris = e.el.querySelector(".iris");
+  });
+  var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var expr = "normal", tempExpr = null, tempUntil = 0;
+  var look = {x:0, y:0}, target = {x:0, y:0}, lastPointer = -1e9;
+  var holding = false, talkUntil = 0, talk = 0, listening = false;
+  var blinkAt = 1500, blinkStart = -1;
+
+  var lines = ["에헤헤, 간지러워!", "오늘도 좋은 하루!", "민트 소다 마실래?", "같이 놀자!", "톡톡, 또 눌렀네?"];
+  var lineIdx = 0;
+
+  function say(text){ bubble.textContent = text; }
+
+  function setExpr(name){
+    expr = name;
+    document.querySelectorAll(".seg button").forEach(function(b){
+      b.setAttribute("aria-pressed", b.dataset.ex === name ? "true" : "false");
+    });
+  }
+  document.querySelectorAll(".seg button").forEach(function(b){
+    b.addEventListener("click", function(){ tempExpr = null; setExpr(b.dataset.ex); });
+  });
+
+  // Eyes follow the finger or mouse
+  window.addEventListener("pointermove", function(ev){
+    var r = svg.getBoundingClientRect();
+    var scale = Math.min(r.width / 400, r.height / 470);
+    var cx = r.left + r.width / 2, cy = r.bottom - (470 - 205) * scale;
+    target.x = Math.max(-1, Math.min(1, (ev.clientX - cx) / (r.width * 0.5)));
+    target.y = Math.max(-1, Math.min(1, (ev.clientY - cy) / (r.height * 0.5)));
+    lastPointer = performance.now();
+  });
+
+  // Tap reaction
+  svg.addEventListener("click", function(){
+    tempExpr = "smile"; tempUntil = performance.now() + 1400;
+    say(lines[lineIdx++ % lines.length]);
+    if (!calm){ jumper.classList.remove("jump"); void jumper.getBoundingClientRect(); jumper.classList.add("jump"); }
+  });
+
+  // Hold to talk
+  function holdOn(){ holding = true; holdBtn.classList.add("on"); }
+  function holdOff(){ holding = false; holdBtn.classList.remove("on"); }
+  holdBtn.addEventListener("pointerdown", function(ev){ holdOn(); try{ holdBtn.setPointerCapture(ev.pointerId); }catch(e){} });
+  ["pointerup","pointercancel","lostpointercapture","blur"].forEach(function(n){ holdBtn.addEventListener(n, holdOff); });
+  holdBtn.addEventListener("keydown", function(ev){ if (ev.key === " " || ev.key === "Enter"){ ev.preventDefault(); holdOn(); } });
+  holdBtn.addEventListener("keyup", holdOff);
+  holdBtn.addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
+
+  // Microphone through speech recognition, when this viewer offers it
+  var dict = null;
+  function tail(text){ return text.length > 48 ? "…" + text.slice(-48) : text; }
+  if (window.claude && typeof window.claude.use === "function"){
+    Promise.resolve(window.claude.use("dictation")).then(function(d){
+      if (!d) return;
+      dict = d;
+      micBtn.hidden = false;
+      hint.textContent = "마이크를 켜고 말하면, 알아들은 말에 맞춰 소다가 입을 움직여요.";
+      d.onPartial(function(p){ talkUntil = performance.now() + 500; if (p && p.text) say(tail(p.text)); });
+      d.onFinal(function(p){ talkUntil = performance.now() + 350; if (p && p.text) say(tail(p.text)); });
+      d.onState(function(s){
+        listening = !!s && s.state === "listening";
+        micBtn.classList.toggle("on", listening);
+        micBtn.textContent = listening ? "마이크 끄기" : "마이크 켜기";
+      });
+    }).catch(function(){});
+  }
+  micBtn.addEventListener("click", function(){
+    if (!dict) return;
+    if (listening){ dict.stop().catch(function(){}); return; }
+    dict.start().catch(function(err){
+      var msg = String((err && (err.code || err.message)) || err);
+      if (msg.indexOf("not_granted") !== -1){
+        micBtn.hidden = true;
+        hint.textContent = "마이크를 쓸 수 없어요. 버튼을 누르고 있으면 소다가 입을 움직여요.";
+      } else {
+        hint.textContent = "마이크를 켜지 못했어요. 다시 눌러 보세요.";
+      }
+    });
+  });
+
+  // ---- Camera face tracking (MediaPipe Face Landmarker) ----
+  var MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+  var MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+  var video = $("cam"), camBtn = $("camBtn");
+  var landmarker = null, stream = null, camOn = false, camBusy = false, lastVideoTime = -1, lastFace = -1e9;
+  var neutral = null, neutralN = 0;
+  var rig = {lidL:1, lidR:1, jaw:0, smile:0, pucker:0, brow:0, irisX:0, irisY:0, yaw:0, pitch:0, roll:0};
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  function mix(key, v, k){ rig[key] += (v - rig[key]) * k; }
+
+  function loadLandmarker(){
+    if (landmarker) return Promise.resolve(landmarker);
+    return import(MP + "/vision_bundle.mjs").then(function(m){
+      return m.FilesetResolver.forVisionTasks(MP + "/wasm").then(function(files){
+        function make(delegate){
+          return m.FaceLandmarker.createFromOptions(files, {
+            baseOptions: {modelAssetPath: MODEL, delegate: delegate},
+            runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true
+          });
+        }
+        return make("GPU").catch(function(){ return make("CPU"); });
+      });
+    }).then(function(l){ landmarker = l; return l; });
+  }
+
+  function stopCam(){
+    camOn = false;
+    if (stream){ stream.getTracks().forEach(function(tr){ tr.stop(); }); stream = null; }
+    video.srcObject = null; video.hidden = true;
+    camBtn.classList.remove("on"); camBtn.textContent = "카메라 켜기";
+    rig.roll = 0;
+  }
+
+  function startCam(){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      hint.textContent = "이 주소에서는 카메라를 켤 수 없어요. https 주소로 열어 주세요.";
+      return;
+    }
+    camBusy = true; camBtn.textContent = "준비 중…";
+    hint.textContent = "얼굴 인식을 준비하고 있어요. 처음에는 몇 초 걸려요.";
+    navigator.mediaDevices.getUserMedia({video: {facingMode: "user", width: {ideal: 480}, height: {ideal: 360}}, audio: false})
+      .then(function(s){
+        stream = s; video.srcObject = s; video.hidden = false;
+        return video.play().catch(function(){}).then(loadLandmarker);
+      })
+      .then(function(){
+        camOn = true; neutral = null; neutralN = 0;
+        camBtn.classList.add("on"); camBtn.textContent = "카메라 끄기";
+        hint.textContent = "정면을 보고 잠깐 가만히 있으면 기준 자세가 잡혀요.";
+        say("카메라 켰어! 표정을 지어 봐.");
+      })
+      .catch(function(err){
+        stopCam();
+        var name = (err && err.name) || "";
+        hint.textContent = (name === "NotAllowedError" || name === "SecurityError")
+          ? "카메라 권한이 거부됐어요. 브라우저 설정에서 카메라를 허용해 주세요."
+          : name === "NotFoundError" ? "카메라를 찾지 못했어요."
+          : "얼굴 인식을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.";
+      })
+      .then(function(){ camBusy = false; });
+  }
+  camBtn.addEventListener("click", function(){ if (camBusy) return; if (camOn) stopCam(); else startCam(); });
+
+  function track(now){
+    if (!camOn || !landmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+    lastVideoTime = video.currentTime;
+    var res;
+    try { res = landmarker.detectForVideo(video, now); } catch (e) { return; }
+    if (!res || !res.faceLandmarks || !res.faceLandmarks.length) return;
+    lastFace = now;
+    var lm = res.faceLandmarks[0], b = {};
+    if (res.faceBlendshapes && res.faceBlendshapes[0]){
+      res.faceBlendshapes[0].categories.forEach(function(c){ b[c.categoryName] = c.score; });
+    }
+    function g(n){ return b[n] || 0; }
+
+    // Head pose from landmarks: 33 and 263 are the outer eye corners, 1 is the nose tip.
+    var a = lm[33], c = lm[263], n = lm[1];
+    var ar = (video.videoWidth || 4) / (video.videoHeight || 3);
+    var dx = (c.x - a.x) * ar, dy = c.y - a.y, d = Math.hypot(dx, dy) || 1e-6;
+    var mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2;
+    var yawRaw = ((n.x - mx) * ar) / d, pitchRaw = (n.y - my) / d;
+    var rollRaw = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (neutralN < 15){
+      neutral = neutral || {yaw: 0, pitch: 0};
+      neutral.yaw += (yawRaw - neutral.yaw) / (neutralN + 1);
+      neutral.pitch += (pitchRaw - neutral.pitch) / (neutralN + 1);
+      neutralN++;
+      if (neutralN === 15) hint.textContent = "소다가 내 표정과 고개 움직임을 따라 하고 있어요.";
+    }
+    // The character acts as a mirror, so left and right are flipped.
+    mix("yaw", clamp(-(yawRaw - neutral.yaw) * 3.2, -1, 1), 0.4);
+    mix("pitch", clamp((pitchRaw - neutral.pitch) * 3.5, -1, 1), 0.4);
+    mix("roll", clamp(-rollRaw, -25, 25), 0.4);
+
+    mix("lidL", 1 - clamp((g("eyeBlinkLeft") - 0.15) / 0.45, 0, 0.92), 0.6);
+    mix("lidR", 1 - clamp((g("eyeBlinkRight") - 0.15) / 0.45, 0, 0.92), 0.6);
+    mix("jaw", clamp((g("jawOpen") - 0.03) * 1.6, 0, 1), 0.5);
+    mix("smile", clamp((g("mouthSmileLeft") + g("mouthSmileRight")) / 2 * 1.4, 0, 1), 0.4);
+    mix("pucker", clamp(g("mouthPucker") * 1.2, 0, 1), 0.4);
+    var up = (g("browInnerUp") + g("browOuterUpLeft") + g("browOuterUpRight")) / 3;
+    var down = (g("browDownLeft") + g("browDownRight")) / 2;
+    mix("brow", clamp(up * 1.5 - down, -1, 1), 0.4);
+    mix("irisX", clamp((g("eyeLookInLeft") - g("eyeLookOutLeft") + g("eyeLookOutRight") - g("eyeLookInRight")) / 2 * 1.6, -1, 1), 0.5);
+    mix("irisY", clamp((g("eyeLookDownLeft") + g("eyeLookDownRight") - g("eyeLookUpLeft") - g("eyeLookUpRight")) / 2 * 1.6, -1, 1), 0.5);
+  }
+
+  function mouthPath(open, surprised, wide, pucker){
+    var amt = wide === true ? 0.7 : (wide || 0);
+    var w = surprised ? 8 : 12 + amt * 6 - (pucker || 0) * 6;
+    var top = surprised ? -4 - open * 6 : 3 + amt * 4;
+    var bottom = 6 + open * 26;
+    return "M" + (200 - w) + " 252 Q200 " + (252 + top) + " " + (200 + w) + " 252 Q200 " + (252 + bottom) + " " + (200 - w) + " 252Z";
+  }
+
+  function frame(now){
+    var t = now / 1000;
+    var e = (tempExpr && now < tempUntil) ? tempExpr : expr;
+    track(now);
+    var live = camOn && now - lastFace < 800;
+    if (live){ target.x = rig.yaw; target.y = rig.pitch; lastPointer = now; }
+    var roll = live ? rig.roll : 0;
+
+    // where to look
+    if (now - lastPointer > 2500){
+      target.x = calm ? 0 : Math.sin(t * 0.5) * 0.4;
+      target.y = calm ? 0 : Math.sin(t * 0.37) * 0.25;
+    }
+    look.x += (target.x - look.x) * 0.12;
+    look.y += (target.y - look.y) * 0.12;
+
+    var bob = calm ? 0 : Math.sin(t * 2) * 2.5;
+    var sway = calm ? 0 : Math.sin(t * 1.6) * 3;
+
+    head.setAttribute("transform", "translate(" + (look.x * 6) + " " + (bob + look.y * 4) + ") rotate(" + (look.x * 3 + roll) + " 200 290)");
+    face.setAttribute("transform", "translate(" + (look.x * 7) + " " + (look.y * 5) + ")");
+    backHair.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ")");
+    tailL.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (sway - look.x * 3) + " 112 166)");
+    tailR.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (-sway - look.x * 3) + " 288 166)");
+    body.setAttribute("transform", "translate(0 " + (bob * 0.3) + ")");
+
+    // blink
+    if (blinkStart < 0 && now > blinkAt) blinkStart = now;
+    var lid = 1;
+    if (blinkStart >= 0){
+      var p = (now - blinkStart) / 150;
+      if (p >= 1){ blinkStart = -1; blinkAt = now + 1800 + Math.random() * 3200; }
+      else lid = Math.max(0.08, Math.abs(1 - p * 2));
+    }
+
+    eyes.forEach(function(eye, i){
+      var happy = e === "smile" || (e === "wink" && i === 0);
+      var lidNow = lid, ix = look.x * 4, iy = look.y * 3;
+      if (live){
+        lidNow = i === 0 ? rig.lidL : rig.lidR;
+        ix = rig.irisX * 6; iy = rig.irisY * 4;
+        happy = happy || (rig.smile > 0.75 && lidNow < 0.75);
+      }
+      eye.open.setAttribute("visibility", happy ? "hidden" : "visible");
+      eye.happy.setAttribute("visibility", happy ? "visible" : "hidden");
+      eye.el.setAttribute("transform", "translate(" + eye.x + " " + eye.y + ")");
+      eye.open.setAttribute("transform", "scale(1 " + lidNow + ")");
+      var s = e === "surprise" ? 0.78 : 1;
+      eye.iris.setAttribute("transform", "translate(" + ix + " " + iy + ") scale(" + s + ")");
+    });
+    brows.setAttribute("transform", "translate(0 " + ((e === "surprise" ? -8 : e === "smile" ? -2 : 0) + (live ? -rig.brow * 9 : 0)) + ")");
+
+    // mouth
+    var speaking = holding || now < talkUntil;
+    var goal = speaking ? 0.25 + 0.75 * Math.abs(Math.sin(t * 13) * Math.sin(t * 5.3 + 1)) : 0;
+    talk += (goal - talk) * 0.35;
+    var base = e === "surprise" ? 0.7 : e === "smile" ? 0.5 : e === "wink" ? 0.3 : 0;
+    if (live) mouth.setAttribute("d", mouthPath(Math.max(base, talk, rig.jaw), e === "surprise" && !speaking, Math.max(e === "smile" ? 0.7 : 0, rig.smile), rig.pucker));
+    else mouth.setAttribute("d", mouthPath(Math.max(base, talk), e === "surprise" && !speaking, e === "smile"));
+
+    requestAnimationFrame(frame);
+  }
+  mouth.setAttribute("d", mouthPath(0, false, false));
+  eyes.forEach(function(eye){ eye.el.setAttribute("transform", "translate(" + eye.x + " " + eye.y + ")"); });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
