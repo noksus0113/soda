@@ -67,7 +67,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="app">
   <header>
     <h1>소다</h1>
-    <p>민트 소다를 좋아하는 버츄얼 캐릭터</p>
+    <p>민트 소다를 좋아하는 버츄얼 캐릭터 · v2</p>
   </header>
 
   <div class="stage">
@@ -189,7 +189,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   var expr = "normal", tempExpr = null, tempUntil = 0;
   var look = {x:0, y:0}, target = {x:0, y:0}, lastPointer = -1e9;
   var holding = false, talkUntil = 0, talk = 0, listening = false;
-  var blinkAt = 1500, blinkStart = -1;
+  var blinkAt = 1500, blinkStart = -1, amp = 1;
 
   var lines = ["에헤헤, 간지러워!", "오늘도 좋은 하루!", "민트 소다 마실래?", "같이 놀자!", "톡톡, 또 눌렀네?"];
   var lineIdx = 0;
@@ -348,25 +348,27 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
     var yawRaw = ((n.x - mx) * ar) / d, pitchRaw = (n.y - my) / d;
     var rollRaw = Math.atan2(dy, dx) * 180 / Math.PI;
     if (neutralN < 15){
-      neutral = neutral || {yaw: 0, pitch: 0};
+      neutral = neutral || {yaw: 0, pitch: 0, blink: 0};
+      neutral.blink += ((g("eyeBlinkLeft") + g("eyeBlinkRight")) / 2 - neutral.blink) / (neutralN + 1);
       neutral.yaw += (yawRaw - neutral.yaw) / (neutralN + 1);
       neutral.pitch += (pitchRaw - neutral.pitch) / (neutralN + 1);
       neutralN++;
       if (neutralN === 15) hint.textContent = "소다가 내 표정과 고개 움직임을 따라 하고 있어요.";
     }
     // The character acts as a mirror, so left and right are flipped.
-    mix("yaw", clamp(-(yawRaw - neutral.yaw) * 3.2, -1, 1), 0.4);
-    mix("pitch", clamp((pitchRaw - neutral.pitch) * 3.5, -1, 1), 0.4);
-    mix("roll", clamp(-rollRaw, -25, 25), 0.4);
+    mix("yaw", clamp(-(yawRaw - neutral.yaw) * 3.2, -1, 1), 0.6);
+    mix("pitch", clamp((pitchRaw - neutral.pitch) * 3.5, -1, 1), 0.6);
+    mix("roll", clamp(-rollRaw * 1.2, -30, 30), 0.6);
 
-    mix("lidL", 1 - clamp((g("eyeBlinkLeft") - 0.15) / 0.45, 0, 0.92), 0.6);
-    mix("lidR", 1 - clamp((g("eyeBlinkRight") - 0.15) / 0.45, 0, 0.92), 0.6);
-    mix("jaw", clamp((g("jawOpen") - 0.03) * 1.6, 0, 1), 0.5);
-    mix("smile", clamp((g("mouthSmileLeft") + g("mouthSmileRight")) / 2 * 1.4, 0, 1), 0.4);
+    var nb = neutral.blink + 0.08, span = Math.max(0.2, 0.7 - nb);
+    mix("lidL", 1 - clamp((g("eyeBlinkLeft") - nb) / span, 0, 0.92), 0.7);
+    mix("lidR", 1 - clamp((g("eyeBlinkRight") - nb) / span, 0, 0.92), 0.7);
+    mix("jaw", clamp((g("jawOpen") - 0.02) * 2.6, 0, 1), 0.6);
+    mix("smile", clamp((g("mouthSmileLeft") + g("mouthSmileRight")) / 2 * 2, 0, 1), 0.5);
     mix("pucker", clamp(g("mouthPucker") * 1.2, 0, 1), 0.4);
     var up = (g("browInnerUp") + g("browOuterUpLeft") + g("browOuterUpRight")) / 3;
     var down = (g("browDownLeft") + g("browDownRight")) / 2;
-    mix("brow", clamp(up * 1.5 - down, -1, 1), 0.4);
+    mix("brow", clamp(up * 2 - down * 1.5, -1, 1), 0.5);
     mix("irisX", clamp((g("eyeLookInLeft") - g("eyeLookOutLeft") + g("eyeLookOutRight") - g("eyeLookInRight")) / 2 * 1.6, -1, 1), 0.5);
     mix("irisY", clamp((g("eyeLookDownLeft") + g("eyeLookDownRight") - g("eyeLookUpLeft") - g("eyeLookUpRight")) / 2 * 1.6, -1, 1), 0.5);
   }
@@ -392,18 +394,22 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       target.x = calm ? 0 : Math.sin(t * 0.5) * 0.4;
       target.y = calm ? 0 : Math.sin(t * 0.37) * 0.25;
     }
-    look.x += (target.x - look.x) * 0.12;
-    look.y += (target.y - look.y) * 0.12;
+    var ease = live ? 0.45 : 0.12;
+    look.x += (target.x - look.x) * ease;
+    look.y += (target.y - look.y) * ease;
+    amp += ((live ? 2.6 : 1) - amp) * 0.1;
+    video.style.borderColor = live ? "#35cdbb" : "";
 
     var bob = calm ? 0 : Math.sin(t * 2) * 2.5;
     var sway = calm ? 0 : Math.sin(t * 1.6) * 3;
 
-    head.setAttribute("transform", "translate(" + (look.x * 6) + " " + (bob + look.y * 4) + ") rotate(" + (look.x * 3 + roll) + " 200 290)");
-    face.setAttribute("transform", "translate(" + (look.x * 7) + " " + (look.y * 5) + ")");
+    head.setAttribute("transform", "translate(" + (look.x * 6 * amp) + " " + (bob + look.y * 4 * amp) + ") rotate(" + (look.x * 3 + roll) + " 200 290)");
+    var squash = 1 - Math.abs(look.x) * 0.045 * (amp - 1);
+    face.setAttribute("transform", "translate(" + (look.x * 7 * amp) + " " + (look.y * 5 * amp) + ") translate(200 215) scale(" + squash + " 1) translate(-200 -215)");
     backHair.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ")");
     tailL.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (sway - look.x * 3) + " 112 166)");
     tailR.setAttribute("transform", "translate(" + (-look.x * 3) + " " + (bob * 0.5) + ") rotate(" + (-sway - look.x * 3) + " 288 166)");
-    body.setAttribute("transform", "translate(0 " + (bob * 0.3) + ")");
+    body.setAttribute("transform", "translate(" + (look.x * 1.5 * (amp - 1)) + " " + (bob * 0.3) + ") rotate(" + (roll * 0.15) + " 200 470)");
 
     // blink
     if (blinkStart < 0 && now > blinkAt) blinkStart = now;
@@ -429,7 +435,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       var s = e === "surprise" ? 0.78 : 1;
       eye.iris.setAttribute("transform", "translate(" + ix + " " + iy + ") scale(" + s + ")");
     });
-    brows.setAttribute("transform", "translate(0 " + ((e === "surprise" ? -8 : e === "smile" ? -2 : 0) + (live ? -rig.brow * 9 : 0)) + ")");
+    brows.setAttribute("transform", "translate(0 " + ((e === "surprise" ? -8 : e === "smile" ? -2 : 0) + (live ? -rig.brow * 13 : 0)) + ")");
 
     // mouth
     var speaking = holding || now < talkUntil;
