@@ -62,7 +62,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="app">
   <header>
     <h1>내 버츄얼 캐릭터</h1>
-    <p>얼굴·손 트래킹 · c4</p>
+    <p>얼굴·손 트래킹 · c5</p>
   </header>
 
   <div class="stage">
@@ -230,7 +230,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   var U = {}, U2 = {}, ready = false, handReady = false, prog = null, prog2 = null;
   var HAND = {"atlas": [760, 813], "parts": {"arm": {"uv": [0, 0, 356, 623], "local": [-254.0, -596.0]}, "palm": {"uv": [358, 0, 187, 210], "local": [-86.0, -51.0]}, "pinky": {"uv": [547, 0, 37, 99], "local": [-108.0, 106.0], "piv": [-82.9, 95.1], "rest": 0.1943, "len": 108.8}, "ring": {"uv": [586, 0, 54, 158], "local": [-93.0, 94.0], "piv": [-51.2, 111.8], "rest": 0.1793, "len": 140.0}, "middle": {"uv": [642, 0, 55, 183], "local": [-51.0, 89.0], "piv": [-13.7, 106.8], "rest": 0.1114, "len": 162.2}, "index": {"uv": [0, 625, 62, 188], "local": [-7.0, 74.0], "piv": [22.2, 89.3], "rest": -0.0374, "len": 138.8}, "thumb": {"uv": [64, 625, 71, 113], "local": [41.0, 51.0], "piv": [75.5, 71.8], "rest": -0.3161, "len": 95.0}}, "armTop": 594.0};
   var FINGERS = ["pinky", "ring", "middle", "index", "thumb"];
-  var HAND_SCALE = 0.9, ARM_LEN = HAND.armTop * HAND_SCALE;
+  var HAND_SCALE = 0.9, ARM_EXTRA = 330, ARM_LEN = (HAND.armTop + ARM_EXTRA) * HAND_SCALE;
   if (!gl){
     hint.textContent = "이 브라우저에서는 캐릭터를 그릴 수 없어요. 크롬 최신 버전에서 열어 주세요.";
   } else {
@@ -390,7 +390,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
     var w = P(0), dir = sub(P(9), w);
     var fx = (1 - faceRef.cx) * ar, fy = faceRef.cy, fd = faceRef.d || 0.24;
     var rx = (w.x - fx) / fd, ry = (w.y - fy) / fd;
-    var out = {tx: clamp(619 + rx * 243 * 0.9, 60, IMG_W - 60), ty: 830 + clamp(ry, -1.5, 4.5) * 95,
+    var out = {tx: clamp(619 + rx * 243 * 0.9, 60, IMG_W - 60), ty: 400 + clamp(ry, -1.5, 5) * 215,
                tang: Math.atan2(-dir.x, dir.y), curl: [], spread: []};
     var phi = {}, name;
     for (name in MPF){
@@ -619,6 +619,8 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
       var handAng = armAng + clamp(wrap(h.ang - armAng), -0.95, 0.95);
       var base = function(t){ return mul(mul(mul(tr(px, py), rot(t)), scl(HAND_SCALE, HAND_SCALE)), scl(h.side ? -1 : 1, 1)); };
       var H = base(handAng);
+      // a second copy of the sleeve further down the arm, so the arm is long enough to reach the face
+      drawPart("arm", mul(base(armAng), tr(0, -ARM_EXTRA)));
       drawPart("palm", H);
       FINGERS.forEach(function(nm, idx){
         var p = HAND.parts[nm], s = 1 - 0.58 * clamp(h.curl[idx], 0, 1);
