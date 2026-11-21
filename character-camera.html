@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
 <title>내 버츄얼 캐릭터 얼굴 트래킹</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
@@ -43,7 +44,7 @@ header p{margin:0;color:var(--muted);font-size:14px}
 .stage{position:relative;flex:1;min-height:260px;border-radius:24px;overflow:hidden;
   background:linear-gradient(180deg,var(--stage-top),var(--stage-bottom));border:1px solid var(--line);
   display:flex;align-items:flex-end;justify-content:center}
-#view{display:block;height:100%;max-width:100%;aspect-ratio:1185/1327;touch-action:none}
+#view{display:block;flex:none;touch-action:none}
 .cam{cursor:pointer;position:absolute;left:12px;bottom:12px;z-index:2;width:88px;height:66px;object-fit:cover;border-radius:12px;
   border:2px solid var(--surface);transform:scaleX(-1);background:#000}
 .controls{display:flex;flex-direction:column;gap:10px}
@@ -61,7 +62,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="app">
   <header>
     <h1>내 버츄얼 캐릭터</h1>
-    <p>얼굴 트래킹 · c1</p>
+    <p>얼굴 트래킹 · c3</p>
   </header>
 
   <div class="stage">
@@ -74,7 +75,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       <button type="button" id="camBtn">카메라 켜기</button>
       <button type="button" id="hold">누르고 있으면 말해요</button>
     </div>
-    <p class="hint" id="hint">카메라를 켜면 캐릭터가 내 표정과 고개 움직임을 따라 해요. 영상은 기기 밖으로 나가지 않아요.</p>
+    <p class="hint" id="hint">카메라를 켜면 캐릭터가 내 표정, 고개, 몸 움직임을 따라 해요. 영상은 기기 밖으로 나가지 않아요.</p>
     <p class="hint" id="trackStatus" hidden></p>
   </div>
 </div>
@@ -100,6 +101,7 @@ uniform vec2 uIris;   // gaze, -1..1
 uniform float uBreath;
 uniform float uTime;
 uniform float uSwing;
+uniform vec4 uBody;   // x: lean (-1..1), y: shoulder tilt in radians, z: up/down (-1..1), w: near/far (-1..1)
 
 // Eyelid as a curtain: skin above the lash line stretches down and carries the lashes over a still eyeball.
 vec2 eye(vec2 q, float xc, float a, float yt0, float lashH, float yb0, float open){
@@ -128,6 +130,17 @@ vec2 eye(vec2 q, float xc, float a, float yt0, float lashH, float yb0, float ope
 
 void main(){
   vec2 p = vP;
+
+  // body: lean closer or away, bob, bend at the waist, tilt the shoulders. The bottom edge stays put.
+  vec2 foot = vec2(619.0, uRes.y);
+  p = foot + (p - foot) / (1.0 + uBody.w * 0.06);
+  p.y -= uBody.z * 16.0 * (1.0 - smoothstep(600.0, uRes.y, p.y));
+  p.x -= uBody.x * 60.0 * (1.0 - smoothstep(350.0, 1150.0, p.y));
+  float bw = 1.0 - smoothstep(850.0, 1250.0, p.y);
+  float ba = -uBody.y * bw;
+  vec2 bd = p - vec2(619.0, 1000.0);
+  float bc = cos(ba), bs = sin(ba);
+  p = vec2(619.0, 1000.0) + vec2(bd.x * bc - bd.y * bs, bd.x * bs + bd.y * bc);
 
   // breathing: the upper body rises and falls a little, the bottom edge stays put
   p.y += uBreath * 3.0 * (1.0 - smoothstep(700.0, uRes.y, p.y));
@@ -210,7 +223,7 @@ void main(){
       var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
       var loc = gl.getAttribLocation(prog, "aPos"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-      ["uTex","uRes","uHead","uLid","uMouth","uIris","uBreath","uTime","uSwing"].forEach(function(n){ U[n] = gl.getUniformLocation(prog, n); });
+      ["uTex","uRes","uHead","uLid","uMouth","uIris","uBreath","uTime","uSwing","uBody"].forEach(function(n){ U[n] = gl.getUniformLocation(prog, n); });
       gl.uniform2f(U.uRes, IMG_W, IMG_H);
       var img = new Image();
       img.onload = function(){
@@ -230,8 +243,13 @@ void main(){
     }
   }
   function fit(){
+    // Size the picture to fit inside the stage without changing its proportions.
+    var box = canvas.parentNode, k = Math.min(box.clientWidth / IMG_W, box.clientHeight / IMG_H);
+    if (!(k > 0)) k = 0.3;
+    var cssW = Math.floor(IMG_W * k), cssH = Math.floor(IMG_H * k);
+    if (canvas.style.width !== cssW + "px"){ canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px"; }
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w = Math.min(IMG_W, Math.round(canvas.clientWidth * dpr)) || IMG_W;
+    var w = Math.min(IMG_W, Math.round(cssW * dpr)) || IMG_W;
     var h = Math.round(w * IMG_H / IMG_W);
     if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
     if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
@@ -240,7 +258,8 @@ void main(){
   // ---------- state ----------
   var look = {x:0, y:0}, target = {x:0, y:0}, lastPointer = -1e9;
   var holding = false, talk = 0, blinkAt = 1500, blinkStart = -1, slowX = 0, swing = 0;
-  var rig = {lidL:1, lidR:1, jaw:0, smile:0, irisX:0, irisY:0, yaw:0, pitch:0, roll:0};
+  var rig = {lidL:1, lidR:1, jaw:0, smile:0, irisX:0, irisY:0, yaw:0, pitch:0, roll:0, bodyX:0, bodyY:0, bodyZ:0};
+  var body = {x:0, tilt:0, y:0, z:0};
   function mix(key, v, k){ rig[key] += (v - rig[key]) * k; }
 
   // test pose from the address, e.g. ?pose=yaw,pitch,rollDeg,lidL,lidR,mouth,smile
@@ -369,7 +388,10 @@ void main(){
     var earR = dist(159, 145) / (dist(33, 133) || 1e-6);
     var gap = dist(13, 14) / d;
     if (neutralN < 15){
-      neutral = neutral || {yaw: 0, pitch: 0, blink: 0, earL: 0, earR: 0, gap: 0};
+      neutral = neutral || {yaw: 0, pitch: 0, blink: 0, earL: 0, earR: 0, gap: 0, cx: 0, cy: 0, d: 0};
+      neutral.cx += (mx - neutral.cx) / (neutralN + 1);
+      neutral.cy += (my - neutral.cy) / (neutralN + 1);
+      neutral.d += (d - neutral.d) / (neutralN + 1);
       neutral.earL += (earL - neutral.earL) / (neutralN + 1);
       neutral.earR += (earR - neutral.earR) / (neutralN + 1);
       neutral.gap += (gap - neutral.gap) / (neutralN + 1);
@@ -377,12 +399,17 @@ void main(){
       neutral.yaw += (yawRaw - neutral.yaw) / (neutralN + 1);
       neutral.pitch += (pitchRaw - neutral.pitch) / (neutralN + 1);
       neutralN++;
-      if (neutralN === 15) hint.textContent = "캐릭터가 내 표정과 고개 움직임을 따라 하고 있어요. 작은 카메라 화면을 누르면 기준을 다시 잡아요.";
+      if (neutralN === 15) hint.textContent = "캐릭터가 내 표정, 고개, 몸 움직임을 따라 하고 있어요. 작은 카메라 화면을 누르면 기준을 다시 잡아요.";
     }
     // The character acts as a mirror, so left and right are flipped.
     mix("yaw", clamp(-(yawRaw - neutral.yaw) * 3.2, -1, 1), 0.6);
     mix("pitch", clamp((pitchRaw - neutral.pitch) * 3.5, -1, 1), 0.6);
     mix("roll", clamp(-rollRaw, -28, 28), 0.6);
+    // Body follows where the face is in the camera view: side to side, up and down, closer or farther.
+    var nd = neutral.d || d;
+    mix("bodyX", clamp(-((mx - neutral.cx) * ar / nd) * 0.8, -1, 1), 0.4);
+    mix("bodyY", clamp(((my - neutral.cy) / nd) * 0.9, -1, 1), 0.4);
+    mix("bodyZ", clamp((d / nd - 1) * 2.5, -1, 1), 0.3);
 
     var nb = neutral.blink + 0.08, span = Math.max(0.2, 0.7 - nb);
     function openness(ear, base, score){
@@ -436,6 +463,14 @@ void main(){
     }
     var lidL = live ? rig.lidL : auto, lidR = live ? rig.lidR : auto;
 
+    var idle = calm ? 0 : Math.sin(t * 0.6) * 0.08;
+    var bx = live ? rig.bodyX + rig.yaw * 0.25 : look.x * 0.35 + idle;
+    var bt = live ? rig.roll * 0.2 + rig.bodyX * 3 : look.x * 1.5 + idle * 6;
+    body.x += (clamp(bx, -1, 1) - body.x) * 0.18;
+    body.tilt += (bt - body.tilt) * 0.18;
+    body.y += ((live ? rig.bodyY : 0) - body.y) * 0.18;
+    body.z += ((live ? rig.bodyZ : 0) - body.z) * 0.15;
+
     var goal = holding ? 0.25 + 0.75 * Math.abs(Math.sin(t * 13) * Math.sin(t * 5.3 + 1)) : 0;
     talk += (goal - talk) * 0.35;
     var mouth = Math.max(talk, live ? rig.jaw : 0);
@@ -446,6 +481,7 @@ void main(){
       yaw = pose[0] || 0; pitch = pose[1] || 0; rollDeg = pose[2] || 0;
       lidL = pose[3] == null ? 1 : pose[3]; lidR = pose[4] == null ? 1 : pose[4];
       mouth = pose[5] || 0; smile = pose[6] || 0; irisX = yaw; irisY = pitch; swing = 0;
+      body.x = pose[7] || 0; body.tilt = pose[8] || 0; body.y = pose[9] || 0; body.z = pose[10] || 0;
     }
 
     if (ready){
@@ -457,6 +493,7 @@ void main(){
       gl.uniform1f(U.uBreath, calm || pose ? 0 : Math.sin(t * 1.8));
       gl.uniform1f(U.uTime, calm || pose ? 0 : t);
       gl.uniform1f(U.uSwing, clamp(swing, -1, 1));
+      gl.uniform4f(U.uBody, body.x, body.tilt * Math.PI / 180, body.y, body.z);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
