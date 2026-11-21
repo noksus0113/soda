@@ -62,19 +62,19 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="app">
   <header>
     <h1>내 버츄얼 캐릭터</h1>
-    <p>얼굴·손 트래킹 · c6</p>
+    <p>얼굴·손 트래킹 · c7</p>
   </header>
 
   <div class="stage">
     <video class="cam" id="cam" playsinline muted hidden></video>
-    <canvas id="view" width="1185" height="1327" role="img" aria-label="은빛 긴 머리에 보라색 드레스를 입은 캐릭터"></canvas>
+    <canvas id="view" width="1185" height="1010" role="img" aria-label="은빛 긴 머리에 보라색 드레스를 입은 캐릭터"></canvas>
   </div>
 
   <div class="controls">
     <div class="talk">
       <button type="button" id="camBtn">카메라 켜기</button>
       <button type="button" id="hold">누르고 있으면 말해요</button>
-      <button type="button" id="swapBtn">손 좌우 바꾸기</button>
+      <button type="button" id="swapBtn">손 좌우 반대로</button>
     </div>
     <p class="hint" id="hint">카메라를 켜면 캐릭터가 내 표정, 고개, 몸, 손 움직임을 따라 해요. 영상은 기기 밖으로 나가지 않아요.</p>
     <p class="hint" id="trackStatus" hidden></p>
@@ -84,9 +84,9 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <script id="vs" type="x-shader/x-vertex">
 attribute vec2 aPos;
 varying vec2 vP;
-uniform vec2 uRes;
+uniform vec2 uCanvas;
 void main(){
-  vP = vec2((aPos.x * 0.5 + 0.5) * uRes.x, (0.5 - aPos.y * 0.5) * uRes.y);
+  vP = vec2((aPos.x * 0.5 + 0.5) * uCanvas.x, (0.5 - aPos.y * 0.5) * uCanvas.y);
   gl_Position = vec4(aPos, 0.0, 1.0);
 }
 </script>
@@ -102,6 +102,8 @@ uniform vec2 uIris;   // gaze, -1..1
 uniform float uBreath;
 uniform float uTime;
 uniform float uSwing;
+uniform vec2 uCanvas; // the visible frame, in picture pixels
+uniform float uZoom;
 uniform vec4 uBody;   // x: lean (-1..1), y: shoulder tilt in radians, z: up/down (-1..1), w: near/far (-1..1)
 
 // Eyelid as a curtain: skin above the lash line stretches down and carries the lashes over a still eyeball.
@@ -130,7 +132,9 @@ vec2 eye(vec2 q, float xc, float a, float yt0, float lashH, float yb0, float ope
 }
 
 void main(){
-  vec2 p = vP;
+  // the frame shows the picture from the elbows up, slightly zoomed out, standing on its bottom edge
+  vec2 stand = vec2(uCanvas.x * 0.5, uCanvas.y);
+  vec2 p = stand + (vP - stand) / uZoom;
 
   // body: lean closer or away, bob, bend at the waist, tilt the shoulders. The bottom edge stays put.
   vec2 foot = vec2(619.0, uRes.y);
@@ -151,7 +155,7 @@ void main(){
   p.x += (sin(uTime * 1.3 + p.y * 0.008) * 3.5 + uSwing * 16.0) * hw;
 
   // head: tilt around the neck, then a soft bulge so the face shifts more than the outline (turn / nod)
-  float w = 1.0 - smoothstep(430.0, 570.0, p.y);
+  float w = 1.0 - smoothstep(430.0, 640.0, p.y);
   vec2 piv = vec2(619.0, 485.0);
   float ang = -uHead.z * w;
   vec2 d = p - piv;
@@ -190,6 +194,7 @@ void main(){
 
   vec4 c = vec4(0.0);
   if (p.x >= 0.0 && p.x <= uRes.x && p.y >= 0.0 && p.y <= uRes.y) c = texture2D(uTex, p / uRes);
+  c *= smoothstep(0.0, 80.0, p.x) * smoothstep(0.0, 80.0, uRes.x - p.x);   // soften the cut-off hair at the sides
   vec3 mouthCol = mix(vec3(0.36, 0.13, 0.20), vec3(0.86, 0.47, 0.52), smoothstep(0.55, 0.95, insideY));
   c = mix(c, vec4(mouthCol, 1.0), inside);
   gl_FragColor = c;
@@ -223,6 +228,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   var $ = function(id){ return document.getElementById(id); };
   var canvas = $("view"), hint = $("hint"), holdBtn = $("hold"), camBtn = $("camBtn"), video = $("cam"), statusLine = $("trackStatus");
   var IMG_W = 1185, IMG_H = 1327;
+  var VIEW_W = 1185, VIEW_H = 1010, ZOOM = 0.9;   // visible frame: the picture down to the elbows
   var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 
@@ -231,7 +237,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   var U = {}, U2 = {}, ready = false, handReady = false, prog = null, prog2 = null;
   var HAND = {"atlas": [760, 813], "parts": {"arm": {"uv": [0, 0, 356, 623], "local": [-254.0, -596.0]}, "palm": {"uv": [358, 0, 187, 210], "local": [-86.0, -51.0], "uvp": [547, 0, 187, 210]}, "pinky": {"uv": [0, 625, 37, 99], "local": [-108.0, 106.0], "piv": [-82.9, 95.1], "rest": 0.1943, "len": 108.8, "uvp": [39, 625, 37, 99]}, "ring": {"uv": [78, 625, 54, 158], "local": [-93.0, 94.0], "piv": [-51.2, 111.8], "rest": 0.1793, "len": 140.0, "uvp": [134, 625, 54, 158]}, "middle": {"uv": [190, 625, 55, 183], "local": [-51.0, 89.0], "piv": [-13.7, 106.8], "rest": 0.1114, "len": 162.2, "uvp": [247, 625, 55, 183]}, "index": {"uv": [304, 625, 62, 188], "local": [-7.0, 74.0], "piv": [22.2, 89.3], "rest": -0.0374, "len": 138.8, "uvp": [368, 625, 62, 188]}, "thumb": {"uv": [432, 625, 71, 113], "local": [41.0, 51.0], "piv": [75.5, 71.8], "rest": -0.3161, "len": 95.0, "uvp": [505, 625, 71, 113]}}, "armTop": 594.0};
   var FINGERS = ["pinky", "ring", "middle", "index", "thumb"];
-  var HAND_SCALE = 0.9, ARM_EXTRA = 330, ARM_LEN = (HAND.armTop + ARM_EXTRA) * HAND_SCALE;
+  var HAND_SCALE = 0.9, ARM_LEN = HAND.armTop * HAND_SCALE, FRAME_B = 1010;
   if (!gl){
     hint.textContent = "이 브라우저에서는 캐릭터를 그릴 수 없어요. 크롬 최신 버전에서 열어 주세요.";
   } else {
@@ -250,8 +256,10 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
       var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-      ["uTex","uRes","uHead","uLid","uMouth","uIris","uBreath","uTime","uSwing","uBody"].forEach(function(n){ U[n] = gl.getUniformLocation(prog, n); });
+      ["uTex","uRes","uHead","uLid","uMouth","uIris","uBreath","uTime","uSwing","uBody","uCanvas","uZoom"].forEach(function(n){ U[n] = gl.getUniformLocation(prog, n); });
       gl.uniform2f(U.uRes, IMG_W, IMG_H);
+      gl.uniform2f(U.uCanvas, VIEW_W, VIEW_H);
+      gl.uniform1f(U.uZoom, ZOOM);
       var img = new Image();
       img.onload = function(){
         gl.activeTexture(gl.TEXTURE0);
@@ -294,13 +302,13 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   }
   function fit(){
     // Size the picture to fit inside the stage without changing its proportions.
-    var box = canvas.parentNode, k = Math.min(box.clientWidth / IMG_W, box.clientHeight / IMG_H);
+    var box = canvas.parentNode, k = Math.min(box.clientWidth / VIEW_W, box.clientHeight / VIEW_H);
     if (!(k > 0)) k = 0.3;
-    var cssW = Math.floor(IMG_W * k), cssH = Math.floor(IMG_H * k);
+    var cssW = Math.floor(VIEW_W * k), cssH = Math.floor(VIEW_H * k);
     if (canvas.style.width !== cssW + "px"){ canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px"; }
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w = Math.min(IMG_W, Math.round(cssW * dpr)) || IMG_W;
-    var h = Math.round(w * IMG_H / IMG_W);
+    var w = Math.min(VIEW_W, Math.round(cssW * dpr)) || VIEW_W;
+    var h = Math.round(w * VIEW_H / VIEW_W);
     if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
     if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
   }
@@ -313,37 +321,40 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   function mix(key, v, k){ rig[key] += (v - rig[key]) * k; }
   function wrap(a){ while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
   function newHand(side){
-    var x = 619 + (side ? 300 : -300);
-    return {side: side, x: x, y: IMG_H + 320, ang: Math.PI, curl: [0,0,0,0,0], spread: [0,0,0,0,0],
-            tx: x, ty: IMG_H + 320, tang: Math.PI, tcurl: [0,0,0,0,0], tspread: [0,0,0,0,0], seen: -1e9, face: 1, tface: 1};
+    var x = side ? 915 : 300;
+    return {side: side, x: x, y: FRAME_B + 320, ang: Math.PI, curl: [0,0,0,0,0], spread: [0,0,0,0,0],
+            tx: x, ty: FRAME_B + 320, tang: Math.PI, tcurl: [0,0,0,0,0], tspread: [0,0,0,0,0], seen: -1e9, face: 1, tface: 1};
   }
   var hands = [newHand(0), newHand(1)];
   var faceRef = {cx: 0.5, cy: 0.4, d: 0.24};
   var handLm = null, handNote = "", frameNo = 0, handCount = 0;
-  // Which of my hands is which is decided by the tracker's left/right label. If it comes out reversed
-  // on this camera, the swap button flips it (and flips palm/back with it).
-  var swapped = false;
-  try { swapped = localStorage.getItem("handSwap") === "1"; } catch (e) {}
+  // The tracker labels each hand "Left" or "Right", but which way round that comes out depends on the camera.
+  // So the page learns it: a hand far out on one side of my face is almost certainly that side's hand.
+  var labelVote = 0;
+  try { labelVote = parseFloat(localStorage.getItem("handLabelVote")) || 0; } catch (e) {}
+  // Default is a mirror: my right hand moves the hand on the right of the screen. The button turns that round.
+  var opposite = false;
+  try { opposite = localStorage.getItem("handOpposite") === "1"; } catch (e) {}
   var swapBtn = $("swapBtn");
-  function showSwap(){ swapBtn.classList.toggle("on", swapped); }
+  function showSwap(){ swapBtn.classList.toggle("on", opposite); }
   showSwap();
   swapBtn.addEventListener("click", function(){
-    swapped = !swapped; showSwap();
-    try { localStorage.setItem("handSwap", swapped ? "1" : "0"); } catch (e) {}
+    opposite = !opposite; showSwap();
+    try { localStorage.setItem("handOpposite", opposite ? "1" : "0"); } catch (e) {}
     hands[0].seen = hands[1].seen = -1e9;
   });
 
-  // test pose from the address, e.g. ?pose=yaw,pitch,rollDeg,lidL,lidR,mouth,smile
+  // test pose from the address, e.g. ?pose=yaw,pitch,rollDeg,lidL,lidR,mouth,smile,lean,tiltDeg,bob,zoom
   var pose = null, m = /[?&]pose=([-0-9.,]+)/.exec(location.search);
   if (m) pose = m[1].split(",").map(Number);
-  // test hands from the address: ?hand=x,y,tiltDeg,curl,spreadDeg (the other hand is mirrored)
+  // test hands from the address: ?hand=x,y,tiltDeg,curl,spreadDeg,face (the other hand is mirrored)
   var handPose = null, m2 = /[?&]hand=([-0-9.,]+)/.exec(location.search);
   if (m2) handPose = m2[1].split(",").map(Number);
 
   window.addEventListener("pointermove", function(ev){
     var r = canvas.getBoundingClientRect();
     target.x = clamp((ev.clientX - (r.left + r.width * 0.52)) / (r.width * 0.5), -1, 1);
-    target.y = clamp((ev.clientY - (r.top + r.height * 0.26)) / (r.height * 0.4), -1, 1);
+    target.y = clamp((ev.clientY - (r.top + r.height * 0.4)) / (r.height * 0.4), -1, 1);
     lastPointer = performance.now();
   });
 
@@ -404,7 +415,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
     var fx = (1 - faceRef.cx) * ar, fy = faceRef.cy, fd = faceRef.d || 0.24;
     var rx = (w.x - fx) / fd, ry = (w.y - fy) / fd;
     var out = {tx: clamp(619 + rx * 243 * 0.9, 60, IMG_W - 60), ty: 400 + clamp(ry, -1.5, 5) * 215,
-               tang: Math.atan2(-dir.x, dir.y), curl: [], spread: []};
+               tang: Math.atan2(-dir.x, dir.y), curl: [], spread: [], rx: rx};
     // palm or back toward the camera: the turn from the index knuckle to the pinky knuckle, seen from the wrist
     var ia = sub(P(5), w), pb = sub(P(17), w);
     var cr = (ia.x * pb.y - ia.y * pb.x) / (len(ia) * len(pb));
@@ -430,30 +441,48 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   }
   function applyHands(hres, now, ar){
     var list = (hres && hres.landmarks) || [], labels = (hres && (hres.handedness || hres.handednesses)) || [];
-    var pick = [null, null], i;
+    var seen = [], i;
     for (i = 0; i < list.length; i++){
-      var cat = labels[i] && labels[i][0], name = cat ? cat.categoryName : "", score = cat ? cat.score : 0;
-      // The camera picture is not mirrored, so the tracker's "Left" is my right hand.
-      var mine = name === "Left" ? 1 : name === "Right" ? -1 : 0;     // +1: my right hand
-      if (swapped) mine = -mine;
-      var f = readHand(list[i], ar, mine || 1);
-      if (!mine) mine = f.tx < 619 ? -1 : 1;
-      var slot = mine > 0 ? 1 : 0;                                    // mirror: my right hand is the hand on the right
-      f.score = score;
-      if (!pick[slot] || pick[slot].score < score) pick[slot] = f;
+      var cat = labels[i] && labels[i][0];
+      var f = readHand(list[i], ar, 1);
+      f.label = cat ? (cat.categoryName === "Left" ? 1 : cat.categoryName === "Right" ? -1 : 0) : 0;
+      f.score = cat ? cat.score : 0;
+      seen.push(f);
     }
+    // learn the label direction. rx > 0 means the hand is on the right of the mirrored view = my right side.
+    if (seen.length === 2 && seen[0].label && seen[0].label === -seen[1].label && Math.abs(seen[0].rx - seen[1].rx) > 1.0){
+      var rightOne = seen[0].rx > seen[1].rx ? seen[0] : seen[1];
+      labelVote = clamp(labelVote + rightOne.label * 3, -60, 60);
+    } else {
+      seen.forEach(function(f){
+        if (f.label && Math.abs(f.rx) > 1.3) labelVote = clamp(labelVote + (f.rx > 0 ? 1 : -1) * f.label, -60, 60);
+      });
+    }
+    if (frameNo % 60 === 0){ try { localStorage.setItem("handLabelVote", String(labelVote)); } catch (e) {} }
+    var dirn = labelVote >= 0 ? 1 : -1;        // +1: the label "Left" means my right hand
+
+    var pick = [null, null];
+    seen.forEach(function(f){
+      var mine = f.label ? f.label * dirn : (f.rx > 0 ? 1 : -1);        // +1: my right hand
+      f.face = clamp(f.face * mine, -1, 1);                               // palm or back, now that the hand is known
+      var slot = mine > 0 ? 1 : 0;                                        // mirror: my right hand = right of the screen
+      if (!pick[slot] || pick[slot].score < f.score) pick[slot] = f;
+    });
     // one hand seen, but under the other label than a moment ago at the same spot: treat it as the same hand
-    if (list.length === 1){
+    if (seen.length === 1){
       var s1 = pick[0] ? 0 : 1, other = 1 - s1, g1 = pick[s1];
       var otherActive = now - hands[other].seen < 400, ownActive = now - hands[s1].seen < 400;
-      if (otherActive && !ownActive && Math.hypot(hands[other].tx - g1.tx, hands[other].ty - g1.ty) < 220){
+      var ox = opposite ? 2 * 619 - hands[other].tx : hands[other].tx;
+      if (otherActive && !ownActive && Math.hypot(ox - g1.tx, hands[other].ty - g1.ty) < 220){
         g1.face = -g1.face; pick[other] = g1; pick[s1] = null;
       }
     }
     handCount = (pick[0] ? 1 : 0) + (pick[1] ? 1 : 0);
     for (i = 0; i < 2; i++){
       if (!pick[i]) continue;
-      var h = hands[i], q = pick[i];
+      var q = pick[i], slotOut = i;
+      if (opposite){ slotOut = 1 - i; q.tx = 2 * 619 - q.tx; q.tang = -q.tang; }   // not a mirror: sides turned round
+      var h = hands[slotOut];
       h.tx = q.tx; h.ty = q.ty; h.tang = q.tang; h.tcurl = q.curl; h.tspread = q.spread; h.tface = q.face; h.seen = now;
     }
   }
@@ -615,8 +644,9 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
   function drawHands(now){
     gl.useProgram(prog2);
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.uniform2f(U2.uRes, IMG_W, IMG_H);
+    gl.uniform2f(U2.uRes, VIEW_W, VIEW_H);
     gl.uniform1i(U2.uTex2, 1);
+    var VIEW = [ZOOM, 0, 0, ZOOM, VIEW_W * 0.5 * (1 - ZOOM), VIEW_H * (1 - ZOOM)];
     hands.forEach(function(h){
       var i, active = camOn && now - h.seen < 350;
       if (handPose){
@@ -625,7 +655,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
         for (i = 0; i < 5; i++){ h.curl[i] = handPose[3] || 0; h.spread[i] = (i - 2) * (handPose[4] || 0) * Math.PI / 180 / 2; }
         h.face = handPose[5] == null ? 1 : handPose[5];
       } else {
-        var tx = h.tx, ty = active ? h.ty : IMG_H + 320;
+        var tx = active ? h.tx : (h.side ? 915 : 300), ty = active ? h.ty : FRAME_B + 320;
         h.x += (tx - h.x) * 0.4; h.y += (ty - h.y) * (active ? 0.4 : 0.15);
         h.ang += wrap((active ? h.tang : Math.PI) - h.ang) * 0.4;
         h.face += ((active ? h.tface : 1) - h.face) * 0.35;
@@ -634,23 +664,22 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
           h.spread[i] += ((active ? h.tspread[i] : 0) - h.spread[i]) * 0.5;
         }
       }
-      // the sleeve points from the wrist toward an elbow below the picture, and must leave through the bottom edge
-      var ex = 619 + (h.side ? 330 : -330), ey = IMG_H + 430, px = h.x, py = h.y, k;
+      // the sleeve points from the wrist toward the elbow, just below the frame under the picture's own upper arm,
+      // and must leave through the bottom edge
+      var ex = h.side ? 915 : 300, ey = FRAME_B + 90, px = h.x, py = h.y, k;
       for (k = 0; k < 2; k++){
         var dx = ex - px, dy = ey - py, dl = Math.hypot(dx, dy) || 1;
-        var minY = IMG_H + 14 - ARM_LEN * (dy / dl);
+        var minY = FRAME_B + 14 - ARM_LEN * (dy / dl);
         if (py < minY) py = minY;
       }
-      if (py - 270 > IMG_H) return;                      // fully below the picture
+      if (py - 270 > FRAME_B) return;                    // fully below the frame
       var ddx = ex - px, ddy = ey - py;
       var armAng = Math.atan2(ddx, -ddy);
       var handAng = armAng + clamp(wrap(h.ang - armAng), -0.95, 0.95);
-      var base = function(t){ return mul(mul(mul(tr(px, py), rot(t)), scl(HAND_SCALE, HAND_SCALE)), scl(h.side ? -1 : 1, 1)); };
+      var base = function(t){ return mul(VIEW, mul(mul(mul(tr(px, py), rot(t)), scl(HAND_SCALE, HAND_SCALE)), scl(h.side ? -1 : 1, 1))); };
       // turning the hand over: it narrows, flips, and shows the palm-side artwork
       var palmSide = h.face < 0, turnX = (palmSide ? -1 : 1) * Math.max(0.14, Math.abs(h.face));
       var H = mul(base(handAng), scl(turnX, 1));
-      // a second copy of the sleeve further down the arm, so the arm is long enough to reach the face
-      drawPart("arm", mul(base(armAng), tr(0, -ARM_EXTRA)));
       drawPart("palm", H, palmSide);
       FINGERS.forEach(function(nm, idx){
         var p = HAND.parts[nm], s = 1 - 0.58 * clamp(h.curl[idx], 0, 1);
@@ -679,7 +708,7 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
     look.x += (target.x - look.x) * ease;
     look.y += (target.y - look.y) * ease;
 
-    var rollDeg = live ? rig.roll * 0.6 : look.x * 4;
+    var rollDeg = live ? rig.roll * 0.45 : look.x * 3;
     slowX += (look.x + rollDeg / 18 - slowX) * 0.06;
     swing += ((slowX - (look.x + rollDeg / 18)) - swing) * 0.2;
 
@@ -694,11 +723,11 @@ void main(){ gl_FragColor = texture2D(uTex2, vT); }
     var lidL = live ? rig.lidL : auto, lidR = live ? rig.lidR : auto;
 
     var idle = calm ? 0 : Math.sin(t * 0.6) * 0.08;
-    var bx = live ? rig.bodyX + rig.yaw * 0.25 : look.x * 0.35 + idle;
-    var bt = live ? rig.roll * 0.2 + rig.bodyX * 3 : look.x * 1.5 + idle * 6;
+    var bx = live ? rig.bodyX * 1.1 + rig.yaw * 0.5 + rig.roll / 60 : look.x * 0.4 + idle;
+    var bt = live ? rig.roll * 0.4 + rig.bodyX * 4 + rig.yaw * 2 : look.x * 2 + idle * 6;
     body.x += (clamp(bx, -1, 1) - body.x) * 0.18;
     body.tilt += (bt - body.tilt) * 0.18;
-    body.y += ((live ? rig.bodyY : 0) - body.y) * 0.18;
+    body.y += ((live ? clamp(rig.bodyY + rig.pitch * 0.35, -1, 1) : 0) - body.y) * 0.18;
     body.z += ((live ? rig.bodyZ : 0) - body.z) * 0.15;
 
     var goal = holding ? 0.25 + 0.75 * Math.abs(Math.sin(t * 13) * Math.sin(t * 5.3 + 1)) : 0;
